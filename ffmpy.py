@@ -12,9 +12,13 @@ import os
 import sys
 import argparse
 import subprocess
+import shlex
 from pymediainfo import MediaInfo
 import time
 from time import localtime, strftime
+
+def enquote(str):
+    return '"{}"'.format(str)
 
 def get_vargs():
     if args.vcopy:
@@ -85,11 +89,14 @@ def get_output_filename():
                print "!!! Too many duplicate output files appear to exist. Fix before trying !!!"
                sys.exit(-2);
     
+    outfile = "\"{}\"".format(outfile)
     print "Output file - " + outfile
     return outfile
 
 def construct_cmd():
-    main_args = [args.ffmpeg , '-i', args.input_file]
+    ffmpeg_bin = enquote(args.ffmpeg)
+    quoted_input = enquote(args.input_file)
+    main_args = [ffmpeg_bin , '-i', quoted_input]
 
     if args.copy:    
         main_args.extend(['-c', 'copy'])
@@ -173,6 +180,7 @@ def report_stats(video_file):
             print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
             print "{:<20} : {}".format("Codec", track.codec, get_video_codec(track))
             print "{:<20} : {}".format("Duration", track.other_duration[0])
+            print "{:<20} : {} x {}".format("Resolution", track.width, track.height)
             print "{:<20} : {}".format("Bit Rate", get_video_bitrate(track))
             print "{:<20} : {}".format("Stream Size: ", get_video_size(track))
             print
@@ -205,7 +213,7 @@ agroup.add_argument ('-b:a', '--abitrate',  help="Audio bitrate. Overrides -aq")
 cgroup.add_argument ('-copy',               help="Copy both audio and video streams. Overrides others", action="store_true")
 cgroup.add_argument ('-copy:v', '--vcopy',  help="Copy only video stream", action="store_true")
 cgroup.add_argument ('-copy:a', '--acopy',  help="Copy only audioo stream", action="store_true")
-parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="ffmpeg.exe")
+parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="C:\\Users\\humayun\\bin\\ffmpeg.exe")
 parser.add_argument ('-p ',     '--preset', help="Preset speed/qual tradeoff. slow(better) ... fast(worse)", default="slow")
 parser.add_argument ('-o',      '--output', help="Specify output filename")
 parser.add_argument ('-n','--no_overwrite', help="Overwrite output file", action="store_true")
@@ -213,7 +221,7 @@ parser.add_argument ('-i',      '--info',   help="Display media information", ac
 parser.add_argument ('-s',  '--samecbr',    help="Convert using same CBR as input (audio and video)", action="store_true")
 vgroup.add_argument ('-s:v',    '--vcbr',   help="Convert using same CBR as input (video)", action="store_true")
 agroup.add_argument ('-s:a',    '--acbr',   help="Convert using same CBR as input (audio)", action="store_true")
-parser.add_argument ('-other',              help="Other arguments to ffmpeg")
+parser.add_argument ('-x',      '--other',  help="Other arguments to ffmpeg")
 
 
 args = parser.parse_args()
@@ -226,12 +234,19 @@ if os.path.exists(args.input_file):
         cmd_args = construct_cmd()
     
         print "\n" + "-" * 22 + " STARTING " + "-" * 22
-        print " ".join([str(i) for i in cmd_args])    
+        cmd_str = " ".join([str(i) for i in cmd_args])
+        print cmd_str
         print "\n" + "-" * 54
-        
+
+        shlexxed_args = shlex.split(cmd_str)
+        # print "SHLEXXED - "
+        # print shlexxed_args
+        # print
+
         t0 = time.time()        
-        ret = subprocess.call(cmd_args)
-        t1 = time.time()        
+        ret = subprocess.call(shlexxed_args)
+        #ret = subprocess.call(cmd_args)
+        t1 = time.time()
         if not ret:
             print "!!! SUCCESS !!!"
             report_stats(args.input_file)
