@@ -16,6 +16,8 @@ import shlex
 from pymediainfo import MediaInfo
 import time
 from time import localtime, strftime
+from colorama import init
+from colorama import Fore, Back, Style
 
 def enquote(str):
     return '"{}"'.format(str)
@@ -174,7 +176,7 @@ def report_stats(video_file):
     for track in media_info.tracks:
         if track.track_type == 'General':
             print "{:<20} : {} ; Streams ({}V / {}A)".format("Codec", track.codec, track.count_of_video_streams, track.count_of_audio_streams)
-            print "{:<20} : {} ; {} ".format("Duration, Size", track.other_duration[0], track.other_file_size[0])
+            print "{:<20} : {} ; {}{}{} ".format("Duration, Size", track.other_duration[0], Fore.CYAN, track.other_file_size[0], Fore.RESET)
             print
         elif track.track_type == 'Video' :
             print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
@@ -182,7 +184,7 @@ def report_stats(video_file):
             print "{:<20} : {}".format("Duration", track.other_duration[0])
             print "{:<20} : {} x {}".format("Resolution", track.width, track.height)
             print "{:<20} : {}".format("Bit Rate", get_video_bitrate(track))
-            print "{:<20} : {}".format("Stream Size: ", get_video_size(track))
+            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.GREEN, get_video_size(track), Fore.RESET)
             print
         elif track.track_type == 'Audio' :
             print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
@@ -190,12 +192,15 @@ def report_stats(video_file):
             print "{:<20} : {}".format("Duration", track.other_duration[0])
             print "{:<20} : {} ({})".format("Bit Rate", track.other_bit_rate[0], get_audio_mode(track))
             print "{:<20} : {} Hz ({})".format("Sampling rate", track.sampling_rate, get_audio_resolution(track))
-            print "{:<20} : {}".format("Stream Size: ", track.other_stream_size[0])
+            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.YELLOW, track.other_stream_size[0], Fore.RESET)
         else:
             print "Omitting info for Track - {}".format(track.track_type)
         
     print "_" * len(filestr)
    
+# Initializes colorama
+init()
+
 parser = argparse.ArgumentParser(description='Convert a file using ffmpeg')
 parser.add_argument ('input_file', help="File to be converted")
 #parser.add_argument ('-t', '--title', help="Title for filename. (Files are renamed to <Title> 01, <Title> 02, ...)", required=True)
@@ -250,7 +255,7 @@ if os.path.exists(args.input_file):
         if not ret:
             print "!!! SUCCESS !!!"
             report_stats(args.input_file)
-            ofile=cmd_args[-1]
+            ofile=cmd_args[-1].strip('"')
             report_stats(ofile)
         else:
             print "FFMpeg exited with error"
