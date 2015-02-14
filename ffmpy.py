@@ -132,13 +132,36 @@ def get_video_bitrate(track):
         if not track.other_maximum_bit_rate is None and track.other_nominal_bit_rate is None:
             br = "{} / {} (nominal) / {} (max)".format(track.other_bit_rate[0], track.other_nominal_bit_rate[0], track.other_maximum_bit_rate[0])
             return br
-    return "{}".format(track.other_bit_rate[0])
+    if track.other_bit_rate is not None:
+        return "{}".format(track.other_bit_rate[0])
+    elif track.other_nominal_bit_rate is not None:
+        return "{}".format(track.other_nominal_bit_rate[0])
+
 
 def get_video_size(track):
     if track.codec == "AVC":
         if not track.other_source_stream_size is None:
             return "{}".format(track.other_source_stream_size[0])
-    return "{}".format(track.other_stream_size[0])
+    if track.other_stream_size is not None:
+        return "{}".format(track.other_stream_size[0])
+    else:
+        return "Unknown"
+
+def get_audio_bitrate(track):
+    if track.other_bit_rate is not None:
+        return "{}".format(track.other_bit_rate[0])
+    elif track.overall_bit_rate is not None:
+        return "{}".format(track.overall_bit_rate[0])
+    else:
+        return "Unknown"
+
+def get_audio_size(track):
+    if track.other_stream_size is not None:
+        return "{}".format(track.other_stream_size[0])
+    elif track.other_file_size is not None:
+        return "{}".format(track.other_file_size[0])
+    else:
+        return "Unknown"
 
 def get_audio_codec(track):
     if track.codec_info is None:
@@ -172,7 +195,6 @@ def report_stats(video_file):
     filestr = "{:<20} : {} ".format("File", video_file)
     print "_" * len(filestr)
     print filestr
-
     for track in media_info.tracks:
         if track.track_type == 'General':
             print "{:<20} : {} ; Streams ({}V / {}A)".format("Codec", track.codec, track.count_of_video_streams, track.count_of_audio_streams)
@@ -190,14 +212,24 @@ def report_stats(video_file):
             print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
             print "{:<20} : {}".format("Codec", get_audio_codec(track))
             print "{:<20} : {}".format("Duration", track.other_duration[0])
-            print "{:<20} : {} ({})".format("Bit Rate", track.other_bit_rate[0], get_audio_mode(track))
+            print "{:<20} : {} ({})".format("Bit Rate", get_audio_bitrate(track), get_audio_mode(track))
             print "{:<20} : {} Hz ({})".format("Sampling rate", track.sampling_rate, get_audio_resolution(track))
-            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.YELLOW, track.other_stream_size[0], Fore.RESET)
+            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.YELLOW, get_audio_size(track), Fore.RESET)
         else:
             print "Omitting info for Track - {}".format(track.track_type)
-        
+
     print "_" * len(filestr)
-   
+
+def humansize(nbytes):
+    suffixes = ['B', 'KiB', 'MiB', 'GiB', 'TB', 'PB']
+    if nbytes == 0: return '0 B'
+    i = 0
+    while nbytes >= 1024 and i < len(suffixes)-1:
+        nbytes /= 1024.
+        i += 1
+    f = ('%.2f' % nbytes).rstrip('0').rstrip('.')
+    return '%s %s' % (f, suffixes[i])
+
 # Initializes colorama
 init()
 
@@ -244,13 +276,14 @@ if os.path.exists(args.input_file):
         print "\n" + "-" * 54
 
         shlexxed_args = shlex.split(cmd_str)
-        # print "SHLEXXED - "
-        # print shlexxed_args
+        #print "SHLEXXED - "
+        #print shlexxed_args
         # print
 
-        t0 = time.time()        
+        t0 = time.time()
         ret = subprocess.call(shlexxed_args)
         #ret = subprocess.call(cmd_args)
+
         t1 = time.time()
         if not ret:
             print "!!! SUCCESS !!!"
@@ -261,11 +294,26 @@ if os.path.exists(args.input_file):
             print "FFMpeg exited with error"
     
         time_end = strftime("%Y-%m-%d %H:%M:%S", localtime())
+        isize = os.stat(args.input_file).st_size;
+        osize = os.stat(ofile).st_size;
         print "\n" + chr(205) * 22 + " REPORT " + chr(205) * 22 # print ════════════
         print "{:<16}: {}".format("Command", " ".join([str(i) for i in cmd_args]))
         print "{:<16}: {}".format("Start time", time_start)
         print '{:<16}: {}'.format("End time", time_end)
         print "{:<16}: {}".format("Conversion Time", strftime ("%H:%M:%S", time.gmtime(t1-t0)))
+        print
+        if osize < isize:
+            diff = Fore.CYAN + humansize(isize - osize)  + Fore.RESET;
+            diff_ratio = 1.0 - (osize * 1.0) / isize
+            print "{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} smaller)".format(
+            "COMPRESSED!!! ", Fore.RED, humansize(isize), Fore.RESET, Fore.GREEN, humansize(osize), Fore.RESET, diff, diff_ratio)
+        else:
+            diff = Fore.BLUE + humansize(osize - isize) + Fore.RESET;
+            diff_ratio = (osize - isize) * 1.0 / isize
+            print "{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} bigger)".format(
+            "WARNING!!! (output file bigger) ", Fore.GREEN, humansize(isize), Fore.RESET, Fore.RED, humansize(osize), Fore.RESET, diff, diff_ratio)
+
+
         print "\n" + chr(196) * 52 # print ────────────────
 else:
     print "ERROR: No such file - ", args.input_file
