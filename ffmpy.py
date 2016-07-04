@@ -29,14 +29,33 @@ def get_vargs():
     
     v_args = ['-c:v', args.vcodec]     
     v_opts = ['-crf', args.crf]
+    v_filter = []
 
     if args.samecbr or args.vcbr:
         v_cbr = get_cbr(args.input_file,'Video')
         v_opts = ['-b:v', v_cbr]
     elif args.vbitrate:
         v_opts = ['-b:v', args.vbitrate]
-     
+
+    if args.aspectratio:
+        res = args.aspectratio
+        if res == "1080p":
+            res = "1920:1080"
+        elif res == "720p":
+            res = "1280:720"
+        elif res == "540p":
+            res = "960:540"
+        elif res == "480p":
+            res = "640:480"
+        elif res == "360p":
+            res == "480:360"
+        elif res == "240p":
+            res == "320:240"
+        scale = "scale={}".format(res)
+        v_filter.extend(['-vf', scale])
+    
     v_args.extend(v_opts)
+    v_args.extend(v_filter)
     return v_args
 
 def get_aargs():
@@ -67,7 +86,7 @@ def get_output_filename():
     infile = args.input_file
     dir = os.path.dirname(infile)
     basename, ext = os.path.splitext(os.path.basename(infile))
-    print dir, basename, ext
+    print(dir, basename, ext)
     mp4ext = '.mp4'
     
     if args.output:
@@ -80,19 +99,19 @@ def get_output_filename():
         if (args.no_overwrite) or samefile(infile, outfile):
         # If outfile is same as infile, give it a new name        
             TOO_MANY_FILES = True
-            print outfile + " already exists. Trying new filename(s)"
+            print(outfile + " already exists. Trying new filename(s)")
             for i in range(1,5):
-                outfile = basename + " NEW " + str(i) + mp4ext
-                print "Now trying new output filename - "  + outfile
+                outfile = os.path.join(dir,basename) + " NEW " + str(i) + mp4ext
+                print("Now trying new output filename - "  + outfile)
                 if os.path.exists(outfile) is False:
                     TOO_MANY_FILES=False                
                     break;
             if TOO_MANY_FILES:
-               print "!!! Too many duplicate output files appear to exist. Fix before trying !!!"
+               print("!!! Too many duplicate output files appear to exist. Fix before trying !!!")
                sys.exit(-2);
     
     outfile = "\"{}\"".format(outfile)
-    print "Output file - " + outfile
+    print("Output file - " + outfile)
     return outfile
 
 def construct_cmd():
@@ -100,7 +119,9 @@ def construct_cmd():
     quoted_input = enquote(args.input_file)
     main_args = [ffmpeg_bin , '-i', quoted_input]
 
-    if args.copy:    
+    if args.check:
+        main_args.extend(['-f', 'null', '-v', 'error', '-nostats', '-'])
+    elif args.copy:    
         main_args.extend(['-c', 'copy'])
     else:
         a_args = get_aargs()
@@ -112,14 +133,22 @@ def construct_cmd():
     if args.other:
         main_args.append(args.other)
 
-    if not args.no_overwrite:
-        main_args.append('-y')
+    # Add metadata comment
+    main_args.extend(['-metadata comment="Transcoding aided by »———————► FFMPY"'])
 
-    output = get_output_filename()
-    print output
-    main_args.append(output)
-    
-    print main_args
+    if not args.check:
+        if not args.no_overwrite:
+            main_args.append('-y')
+
+        if not args.nofaststart:
+            main_args.extend(['-movflags', 'faststart'])
+
+        output = get_output_filename()
+        print(output)
+        main_args.append(output)
+
+
+    print(main_args)
     return main_args
     
 def get_video_codec(track):
@@ -128,15 +157,20 @@ def get_video_codec(track):
     return "{} ({})".format(track.codec, track.codec_info)
     
 def get_video_bitrate(track):
+    br = "Unknown/Could not parse"
     if track.codec == "AVC":
-        if not track.other_maximum_bit_rate is None and track.other_nominal_bit_rate is None:
+        if track.other_bit_rate is not None and track.other_maximum_bit_rate is not None and track.other_nominal_bit_rate is not None:
             br = "{} / {} (nominal) / {} (max)".format(track.other_bit_rate[0], track.other_nominal_bit_rate[0], track.other_maximum_bit_rate[0])
-            return br
+        elif not track.other_bit_rate is None:
+            br = "{}".format(track.other_bit_rate[0])
+        return br
     if track.other_bit_rate is not None:
-        return "{}".format(track.other_bit_rate[0])
+        br = "{}".format(track.other_bit_rate[0])
     elif track.other_nominal_bit_rate is not None:
-        return "{}".format(track.other_nominal_bit_rate[0])
-
+        br = "{}".format(track.other_nominal_bit_rate[0])
+    elif track.bit_rate is not None:
+        br = "{}".format(track.bit_rate[0])
+    return br
 
 def get_video_size(track):
     if track.codec == "AVC":
@@ -148,12 +182,16 @@ def get_video_size(track):
         return "Unknown"
 
 def get_audio_bitrate(track):
+    br = "Unknown/Could not parse"
     if track.other_bit_rate is not None:
-        return "{}".format(track.other_bit_rate[0])
+        br = "{}".format(track.other_bit_rate[0])
     elif track.overall_bit_rate is not None:
-        return "{}".format(track.overall_bit_rate[0])
+        br = "{}".format(track.overall_bit_rate[0])
     else:
-        return "Unknown"
+        if track.codec == "AAC":
+            if track.other_maximum_bit_rate is not None and track.other_nominal_bit_rate is not None:
+                br = "{} (nominal) / {} (max)".format(track.other_nominal_bit_rate[0], track.other_maximum_bit_rate[0])
+    return br
 
 def get_audio_size(track):
     if track.other_stream_size is not None:
@@ -188,37 +226,74 @@ def get_cbr(video_file, t_type):
     
     return str(cbr)
 
+def get_value_if_not_none(var, index):
+    if var is not None:
+        return var[index]
+    return "Unknown"
 
-def report_stats(video_file):
+def report_stats(video_file, summary=False):
     media_info = MediaInfo.parse(video_file)
 
     filestr = "{:<20} : {} ".format("File", video_file)
-    print "_" * len(filestr)
-    print filestr
+
+    # Print a one line summary
+    if summary:
+        for track in media_info.tracks:
+            if track.track_type == 'General':
+                format = track.codec
+                duration = get_value_if_not_none(track.other_duration,0)
+                size = track.other_file_size[0]
+            elif track.track_type == 'Video' :
+                vcodec = track.codec
+                resolution = "{}x{}".format(track.width, track.height)
+                vbitrate = get_video_bitrate(track)
+                vsize = get_video_size(track)
+            elif track.track_type == 'Audio' :
+                acodec = track.codec
+                abitrate = get_audio_bitrate(track)
+                abitratetype = get_audio_mode(track)
+                asamplingrate = track.sampling_rate
+                asize = get_audio_size(track)
+        mainstr = "[{}]: {} {} {}{}{}".format(video_file, format, duration, Fore.MAGENTA, size, Fore.RESET)
+        vstr = "{} {}{} {}{} {}{}{}".format(vcodec, Fore.GREEN, resolution, Fore.YELLOW, vbitrate, Fore.CYAN, vsize, Fore.RESET)
+        astr = "{} {}{}({}) {}{}  {}{}{}".format(acodec, Fore.YELLOW, abitrate, abitratetype, Fore.GREEN, asamplingrate, Fore.CYAN, asize, Fore.RESET)
+        #outstr = "{}: {} {} {} | {} {} {} {} | {} {} {} {} {}".format(video_file, duration, size, format, vcodec, resolution, vbitrate, vsize, acodec, abitrate, abitratetype, asamplingrate, asize)
+        outstr = "{} / {} / {}".format(mainstr, vstr, astr)
+        print (outstr)
+        return
+
+    # Print a full tabular report
+    print("_" * len(filestr))
+    print(filestr)
     for track in media_info.tracks:
         if track.track_type == 'General':
-            print "{:<20} : {} ; Streams ({}V / {}A)".format("Codec", track.codec, track.count_of_video_streams, track.count_of_audio_streams)
-            print "{:<20} : {} ; {}{}{} ".format("Duration, Size", track.other_duration[0], Fore.CYAN, track.other_file_size[0], Fore.RESET)
-            print
+            print("{:<20} : {} ; Streams ({}V / {}A)".format("Codec", track.codec, track.count_of_video_streams, track.count_of_audio_streams))
+            print("{:<20} : {} ; {}{}{} ".format("Duration, Size", get_value_if_not_none(track.other_duration,0), Fore.CYAN, track.other_file_size[0], Fore.RESET))
+            print()
         elif track.track_type == 'Video' :
-            print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
-            print "{:<20} : {}".format("Codec", track.codec, get_video_codec(track))
-            print "{:<20} : {}".format("Duration", track.other_duration[0])
-            print "{:<20} : {} x {}".format("Resolution", track.width, track.height)
-            print "{:<20} : {}".format("Bit Rate", get_video_bitrate(track))
-            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.GREEN, get_video_size(track), Fore.RESET)
-            print
+            print("{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format))
+            print("{:<20} : {}".format("Codec", track.codec, get_video_codec(track)))
+            print("{:<20} : {}".format("Duration", get_value_if_not_none(track.other_duration,0)))
+            print("{:<20} : {} x {}".format("Resolution", track.width, track.height))
+            print("{:<20} : {}".format("Bit Rate", get_video_bitrate(track)))
+            print("{:<20} : {}{}{}".format("Stream Size: ", Fore.GREEN, get_video_size(track), Fore.RESET))
+            print()
         elif track.track_type == 'Audio' :
-            print "{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format)
-            print "{:<20} : {}".format("Codec", get_audio_codec(track))
-            print "{:<20} : {}".format("Duration", track.other_duration[0])
-            print "{:<20} : {} ({})".format("Bit Rate", get_audio_bitrate(track), get_audio_mode(track))
-            print "{:<20} : {} Hz ({})".format("Sampling rate", track.sampling_rate, get_audio_resolution(track))
-            print "{:<20} : {}{}{}".format("Stream Size: ", Fore.YELLOW, get_audio_size(track), Fore.RESET)
+            print("{:<20} : {} (ID - {}); {}".format("Track", track.track_type, track.track_id, track.format))
+            print("{:<20} : {}".format("Codec", get_audio_codec(track)))
+            print("{:<20} : {}".format("Duration", get_value_if_not_none(track.other_duration,0)))
+            print("{:<20} : {} ({})".format("Bit Rate", get_audio_bitrate(track), get_audio_mode(track)))
+            print("{:<20} : {} Hz ({})".format("Sampling rate", track.sampling_rate, get_audio_resolution(track)))
+            print("{:<20} : {}{}{}".format("Stream Size: ", Fore.YELLOW, get_audio_size(track), Fore.RESET))
+            print()
         else:
-            print "Omitting info for Track - {}".format(track.track_type)
+            if track.type is not None:
+                print("Omitting info for track type - {}".format(track.type))
+            else:
+                print("Omitting info for Track - {}".format(track.track_type))
 
-    print "_" * len(filestr)
+
+    print("_" * len(filestr))
 
 def humansize(nbytes):
     suffixes = ['B', 'KiB', 'MiB', 'GiB', 'TB', 'PB']
@@ -250,71 +325,89 @@ agroup.add_argument ('-b:a', '--abitrate',  help="Audio bitrate. Overrides -aq")
 cgroup.add_argument ('-copy',               help="Copy both audio and video streams. Overrides others", action="store_true")
 cgroup.add_argument ('-copy:v', '--vcopy',  help="Copy only video stream", action="store_true")
 cgroup.add_argument ('-copy:a', '--acopy',  help="Copy only audioo stream", action="store_true")
-parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="ffmpeg.exe")
+parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="ffmpeg")
 parser.add_argument ('-p ',     '--preset', help="Preset speed/qual tradeoff. slow(better) ... fast(worse)", default="slow")
 parser.add_argument ('-o',      '--output', help="Specify output filename")
 parser.add_argument ('-n','--no_overwrite', help="Overwrite output file", action="store_true")
 parser.add_argument ('-i',      '--info',   help="Display media information", action="store_true")
+parser.add_argument ('-1', '--summary',     help="Media info one-line summary", action="store_true")
 parser.add_argument ('-s',  '--samecbr',    help="Convert using same CBR as input (audio and video)", action="store_true")
 vgroup.add_argument ('-s:v',    '--vcbr',   help="Convert using same CBR as input (video)", action="store_true")
 agroup.add_argument ('-s:a',    '--acbr',   help="Convert using same CBR as input (audio)", action="store_true")
+parser.add_argument ('-r', '--aspectratio', help="Specify aspect ratio in FFMPEG width:height format e.g. 1280:720 or -1:1080 OR 1080p,720p,540p,480p,360p")
 parser.add_argument ('-x',      '--other',  help="Other arguments to ffmpeg")
+parser.add_argument ('--nofaststart',       help="Disable passing the '-movflags faststart' argument to ffmpeg", action="store_true")
+parser.add_argument ('--showonly'   ,       help="Disable actual run and show only the arguments passed to ffmpeg", action="store_true")
+parser.add_argument ('-check'   ,           help="Check for integrity of files, print errors only", action="store_true")
 
 
 args = parser.parse_args()
 
 if os.path.exists(args.input_file):
-    if args.info:
+    if args.summary:
+        report_stats(args.input_file, summary=True)
+    elif args.info:
         report_stats(args.input_file)
     else:
         time_start = strftime("%Y-%m-%d %H:%M:%S", localtime())        
         cmd_args = construct_cmd()
     
-        print "\n" + "-" * 22 + " STARTING " + "-" * 22
+        print("\n" + "-" * 22 + " STARTING " + "-" * 22)
         cmd_str = " ".join([str(i) for i in cmd_args])
-        print cmd_str
-        print "\n" + "-" * 54
+        print(cmd_str)
+        print("\n" + "-" * 54)
 
         shlexxed_args = shlex.split(cmd_str)
         #print "SHLEXXED - "
         #print shlexxed_args
         # print
 
+        if args.showonly:
+            print("Skipping actual run of ffmpeg due to argument --showonly")
+            sys.exit(0)
+        
         t0 = time.time()
         ret = subprocess.call(shlexxed_args)
         #ret = subprocess.call(cmd_args)
 
         t1 = time.time()
         if not ret:
-            print "!!! SUCCESS !!!"
+            print("!!! SUCCESS !!!")
             report_stats(args.input_file)
-            ofile=cmd_args[-1].strip('"')
-            report_stats(ofile)
+            if not args.check:
+                ofile=cmd_args[-1].strip('"')
+                report_stats(ofile)
         else:
-            print "FFMpeg exited with error"
+            print("FFMpeg exited with error")
     
         time_end = strftime("%Y-%m-%d %H:%M:%S", localtime())
         isize = os.stat(args.input_file).st_size;
-        osize = os.stat(ofile).st_size;
-        print "\n" + chr(205) * 22 + " REPORT " + chr(205) * 22 # print ════════════
-        print "{:<16}: {}".format("Command", " ".join([str(i) for i in cmd_args]))
-        print "{:<16}: {}".format("Start time", time_start)
-        print '{:<16}: {}'.format("End time", time_end)
-        print "{:<16}: {}".format("Conversion Time", strftime ("%H:%M:%S", time.gmtime(t1-t0)))
-        print
-        if osize < isize:
-            diff = Fore.CYAN + humansize(isize - osize)  + Fore.RESET;
-            diff_ratio = 1.0 - (osize * 1.0) / isize
-            print "{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} smaller)".format(
-            "COMPRESSED!!! ", Fore.RED, humansize(isize), Fore.RESET, Fore.GREEN, humansize(osize), Fore.RESET, diff, diff_ratio)
+        if not args.check:
+            osize = os.stat(ofile).st_size;
+        box_single_line = '\u2500'
+        box_double_line = '\u2550'
+        print("\n" + box_double_line * 22 + " REPORT " + box_double_line * 22) # print ????????????????????????????????????
+        print("{:<16}: {}".format("Command", " ".join([str(i) for i in cmd_args])))
+        print("{:<16}: {}".format("Start time", time_start))
+        print('{:<16}: {}'.format("End time", time_end))
+        print("{:<16}: {}".format("Conversion Time", strftime ("%H:%M:%S", time.gmtime(t1-t0))))
+        print()
+        if not args.check:
+            if osize < isize:
+                diff = Fore.CYAN + humansize(isize - osize)  + Fore.RESET;
+                diff_ratio = 1.0 - (osize * 1.0) / isize
+                print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} smaller)".format(
+                    "COMPRESSED!!! ", Fore.RED, humansize(isize), Fore.RESET, Fore.GREEN, humansize(osize), Fore.RESET, diff, diff_ratio))
+            else:
+                diff = Fore.BLUE + humansize(osize - isize) + Fore.RESET;
+                diff_ratio = (osize - isize) * 1.0 / isize
+                print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} bigger)".format(
+                    "WARNING!!! (output file bigger) ", Fore.GREEN, humansize(isize), Fore.RESET, Fore.RED, humansize(osize), Fore.RESET, diff, diff_ratio))
         else:
-            diff = Fore.BLUE + humansize(osize - isize) + Fore.RESET;
-            diff_ratio = (osize - isize) * 1.0 / isize
-            print "{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} bigger)".format(
-            "WARNING!!! (output file bigger) ", Fore.GREEN, humansize(isize), Fore.RESET, Fore.RED, humansize(osize), Fore.RESET, diff, diff_ratio)
+            print("Integrity check finished. If you see no error messages, then file has no errors")
+        
 
-
-        print "\n" + chr(196) * 52 # print ────────────────
+        print("\n" + box_single_line * 52) # print ????????????????????????????????????????????????
 else:
-    print "ERROR: No such file - ", args.input_file
+    print("ERROR: No such file - ", args.input_file)
     sys.exit(-1);
