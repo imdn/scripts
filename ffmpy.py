@@ -9,10 +9,13 @@ Created on Sun Aug 10 19:17:03 2014
 """
 
 import os
+import platform
 import sys
 import argparse
 import subprocess
 import shlex
+import re
+from collections import OrderedDict
 from pymediainfo import MediaInfo
 import time
 from time import localtime, strftime
@@ -136,6 +139,13 @@ def construct_cmd():
     # Add metadata comment
     main_args.extend(['-metadata comment="Transcoding aided by »———————► FFMPY"'])
 
+    if args.autocrop:
+        crop_params = get_crop_values(args.input_file)
+        if crop_params == None:
+            print("Unknown error occurred when obtaining crop values. Blame the dev for exiting ...")
+            sys.exit(-1)
+        main_args.append("-vf {}".format(crop_params))
+
     if not args.check:
         if not args.no_overwrite:
             main_args.append('-y')
@@ -146,7 +156,6 @@ def construct_cmd():
         output = get_output_filename()
         print(output)
         main_args.append(output)
-
 
     print(main_args)
     return main_args
@@ -230,6 +239,48 @@ def get_value_if_not_none(var, index):
     if var is not None:
         return var[index]
     return "Unknown"
+
+def get_crop_values(infile):
+    try:
+        filename = os.path.basename(infile)
+        TIMEOUT=60
+        log_file = "cropdetect_" + filename + ".log"
+        null_dev = "/dev/null"
+        if platform.system() is 'Windows':
+            null_dev = "NUL"
+        command = "\"{}\" -i {} -vf cropdetect -report -f null {}".format(args.ffmpeg, infile, null_dev)
+        print(command)
+        env_dict = os.environ.copy()
+        env_dict['FFREPORT'] = 'file={}:level=32'.format(log_file)
+        print("Reading cropdetect values for file - {}".format(infile))
+        ret = -1
+        ret = subprocess.Popen(shlex.split(command), env=env_dict, stderr=open(os.devnull, 'w')).wait(timeout=TIMEOUT)
+
+    except subprocess.TimeoutExpired as E:
+        print("Not reading cropdetect values from {} beyond {} seconds".format(infile, TIMEOUT))
+        #print(E)
+    finally:
+        if ret > 0:
+            print ("Error occurred when reading cropdetect values. Exiting ...")
+            sys.exit(-2)
+        else:
+            ret_crop = None 
+            with open(log_file, 'r') as fp:
+                pattern = "^\[Parsed_cropdetect.*(crop=\d+:\d+:\d+:\d+)$"
+                crop_vals = OrderedDict()
+                for line in fp:
+                    match = re.search(pattern, line)
+                    if (match):
+                        crop_vals[match.group(1)] = True
+                if len(crop_vals) > 0:
+                    print("\nCrop Values Detected. Autocrop uses first value used by default if more than one")
+                    count = 0
+                    for key in crop_vals:
+                        print("{}".format(key))
+                        if count == 0:
+                            ret_crop = key
+                        count += 1
+            return ret_crop                    
 
 def report_stats(video_file, summary=False):
     media_info = MediaInfo.parse(video_file)
@@ -324,7 +375,7 @@ agroup.add_argument ('-q:a', '--aquality',  help="Audio quality", default='5')
 agroup.add_argument ('-b:a', '--abitrate',  help="Audio bitrate. Overrides -aq")
 cgroup.add_argument ('-copy',               help="Copy both audio and video streams. Overrides others", action="store_true")
 cgroup.add_argument ('-copy:v', '--vcopy',  help="Copy only video stream", action="store_true")
-cgroup.add_argument ('-copy:a', '--acopy',  help="Copy only audioo stream", action="store_true")
+cgroup.add_argument ('-copy:a', '--acopy',  help="Copy only audio stream", action="store_true")
 parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="ffmpeg")
 parser.add_argument ('-p ',     '--preset', help="Preset speed/qual tradeoff. slow(better) ... fast(worse)", default="slow")
 parser.add_argument ('-o',      '--output', help="Specify output filename")
@@ -338,7 +389,8 @@ parser.add_argument ('-r', '--aspectratio', help="Specify aspect ratio in FFMPEG
 parser.add_argument ('-x',      '--other',  help="Other arguments to ffmpeg")
 parser.add_argument ('--nofaststart',       help="Disable passing the '-movflags faststart' argument to ffmpeg", action="store_true")
 parser.add_argument ('--showonly'   ,       help="Disable actual run and show only the arguments passed to ffmpeg", action="store_true")
-parser.add_argument ('-check'   ,           help="Check for integrity of files, print errors only", action="store_true")
+parser.add_argument ('--check'   ,          help="Check for integrity of files, print errors only", action="store_true")
+parser.add_argument ('--autocrop'   ,       help="Crop black borders automatically", action="store_true")
 
 
 args = parser.parse_args()
@@ -351,7 +403,7 @@ if os.path.exists(args.input_file):
     else:
         time_start = strftime("%Y-%m-%d %H:%M:%S", localtime())        
         cmd_args = construct_cmd()
-    
+
         print("\n" + "-" * 22 + " STARTING " + "-" * 22)
         cmd_str = " ".join([str(i) for i in cmd_args])
         print(cmd_str)
