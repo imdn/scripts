@@ -1,3 +1,4 @@
+#!/bin/python
 # -*- coding: utf-8 -*-
 """
 Created on Sun Aug 10 19:17:03 2014
@@ -248,7 +249,7 @@ def get_crop_values(infile):
         null_dev = "/dev/null"
         if platform.system() is 'Windows':
             null_dev = "NUL"
-        command = "\"{}\" -i {} -vf cropdetect -report -f null {}".format(args.ffmpeg, infile, null_dev)
+        command = "\"{}\" -i \"{}\" -vf cropdetect -report -f null {}".format(args.ffmpeg, infile, null_dev)
         print(command)
         env_dict = os.environ.copy()
         env_dict['FFREPORT'] = 'file={}:level=32'.format(log_file)
