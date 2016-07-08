@@ -133,7 +133,13 @@ def construct_cmd():
         main_args.extend(v_args)            
         main_args.extend(a_args)
         main_args.extend(['-preset', args.preset])
-    
+        if args.hflip:
+            main_args.extend(['-vf', 'hflip'])
+        if args.vflip:
+            main_args.extend(['-vf', 'vflip'])
+
+
+
     if args.other:
         main_args.append(args.other)
 
@@ -344,7 +350,6 @@ def report_stats(video_file, summary=False):
             else:
                 print("Omitting info for Track - {}".format(track.track_type))
 
-
     print("_" * len(filestr))
 
 def humansize(nbytes):
@@ -392,7 +397,8 @@ parser.add_argument ('--nofaststart',       help="Disable passing the '-movflags
 parser.add_argument ('--showonly'   ,       help="Disable actual run and show only the arguments passed to ffmpeg", action="store_true")
 parser.add_argument ('--check'   ,          help="Check for integrity of files, print errors only", action="store_true")
 parser.add_argument ('--autocrop'   ,       help="Crop black borders automatically", action="store_true")
-
+parser.add_argument ('--hflip'   ,          help="Flip Horizontally", action="store_true")
+parser.add_argument ('--vflip'   ,          help="Flip Vertically", action="store_true")
 
 args = parser.parse_args()
 
