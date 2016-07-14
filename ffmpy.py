@@ -16,6 +16,7 @@ import argparse
 import subprocess
 import shlex
 import re
+import glob
 from collections import OrderedDict
 from pymediainfo import MediaInfo
 import time
@@ -36,7 +37,7 @@ def get_vargs():
     v_filter = []
 
     if args.samecbr or args.vcbr:
-        v_cbr = get_cbr(args.input_file,'Video')
+        v_cbr = get_cbr(args.input_file[0],'Video')
         v_opts = ['-b:v', v_cbr]
     elif args.vbitrate:
         v_opts = ['-b:v', args.vbitrate]
@@ -75,7 +76,7 @@ def get_aargs():
     a_opts = ['-q:a', args.aquality]    
 
     if args.samecbr or args.acbr:
-        a_cbr = get_cbr(args.input_file,'Audio')
+        a_cbr = get_cbr(args.input_file[0],'Audio')
         a_opts = ['-b:a', a_cbr]
     elif args.abitrate:
         a_opts = ['-b:a', args.abitrate]
@@ -87,16 +88,18 @@ def samefile(file1, file2):
     return os.stat(file1) == os.stat(file2)
     
 def get_output_filename():
-    infile = args.input_file
+    infile = args.input_file[0]
     dir = os.path.dirname(infile)
     basename, ext = os.path.splitext(os.path.basename(infile))
-    print(dir, basename, ext)
+    #print(dir, basename, ext)
     mp4ext = '.mp4'
     
     if args.output:
         outfile=args.output
         basename, ext = os.path.splitext(outfile)
     else:
+        if args.join:
+            basename= basename + "_JOINED"
         outfile = os.path.join(dir,basename) + mp4ext
         
     if os.path.exists(outfile):
@@ -118,36 +121,45 @@ def get_output_filename():
     print("Output file - " + outfile)
     return outfile
 
+def create_join_cmd():
+    # TODO -  check behaviour in Windows prompt
+    with open(JOIN_TEMPFILE,'w') as fp:
+        print ("Joining files - {}".format(args.input_file))
+        for file in args.input_file:
+            fp.write("file '{}'\n".format(file))
+
 def construct_cmd():
     ffmpeg_bin = enquote(args.ffmpeg)
-    quoted_input = enquote(args.input_file)
+    quoted_input = enquote(args.input_file[0])
     main_args = [ffmpeg_bin , '-i', quoted_input]
 
     if args.check:
         main_args.extend(['-f', 'null', '-v', 'error', '-nostats', '-'])
-    elif args.copy:    
-        main_args.extend(['-c', 'copy'])
     else:
-        a_args = get_aargs()
-        v_args = get_vargs()
-        main_args.extend(v_args)            
-        main_args.extend(a_args)
-        main_args.extend(['-preset', args.preset])
-        if args.hflip:
-            main_args.extend(['-vf', 'hflip'])
-        if args.vflip:
-            main_args.extend(['-vf', 'vflip'])
+        if args.join:
+            create_join_cmd()
+            main_args = [ffmpeg_bin, '-safe 0 -f concat' , '-i', JOIN_TEMPFILE]
+        if args.copy:
+            main_args.extend(['-c', 'copy'])
+        else:
+            a_args = get_aargs()
+            v_args = get_vargs()
+            main_args.extend(v_args)            
+            main_args.extend(a_args)
+            main_args.extend(['-preset', args.preset])
+            if args.hflip:
+                main_args.extend(['-vf', 'hflip'])
+            if args.vflip:
+                main_args.extend(['-vf', 'vflip'])
 
-
-
-    if args.other:
-        main_args.append(args.other)
+        if args.other:
+            main_args.append(args.other)
 
     # Add metadata comment
     main_args.extend(['-metadata comment="Transcoding aided by »———————► FFMPY"'])
 
     if args.autocrop:
-        crop_params = get_crop_values(args.input_file)
+        crop_params = get_crop_values(args.input_file[0])
         if crop_params == None:
             print("Unknown error occurred when obtaining crop values. Blame the dev for exiting ...")
             sys.exit(-1)
@@ -161,7 +173,6 @@ def construct_cmd():
             main_args.extend(['-movflags', 'faststart'])
 
         output = get_output_filename()
-        print(output)
         main_args.append(output)
 
     print(main_args)
@@ -365,8 +376,9 @@ def humansize(nbytes):
 # Initializes colorama
 init()
 
+
 parser = argparse.ArgumentParser(description='Convert a file using ffmpeg')
-parser.add_argument ('input_file', help="File to be converted")
+parser.add_argument ('input_file', help="File to be converted", nargs="+")
 #parser.add_argument ('-t', '--title', help="Title for filename. (Files are renamed to <Title> 01, <Title> 02, ...)", required=True)
 vgroup = parser.add_mutually_exclusive_group()
 agroup = parser.add_mutually_exclusive_group()
@@ -399,74 +411,91 @@ parser.add_argument ('--check'   ,          help="Check for integrity of files, 
 parser.add_argument ('--autocrop'   ,       help="Crop black borders automatically", action="store_true")
 parser.add_argument ('--hflip'   ,          help="Flip Horizontally", action="store_true")
 parser.add_argument ('--vflip'   ,          help="Flip Vertically", action="store_true")
+parser.add_argument ('--join',              help="Join list of clips (supports wildcards e.g ffmpy sampA* sampB* --join )", action = "store_true")
 
 args = parser.parse_args()
 
-if os.path.exists(args.input_file):
-    if args.summary:
-        report_stats(args.input_file, summary=True)
-    elif args.info:
-        report_stats(args.input_file)
-    else:
-        time_start = strftime("%Y-%m-%d %H:%M:%S", localtime())        
-        cmd_args = construct_cmd()
+# Filename for tempfile which contains entries in the form 'file <input_filename>' for concatenation
+JOIN_TEMPFILE = "ffmpy_join_filelist.txt"
 
-        print("\n" + "-" * 22 + " STARTING " + "-" * 22)
-        cmd_str = " ".join([str(i) for i in cmd_args])
-        print(cmd_str)
-        print("\n" + "-" * 54)
-
-        shlexxed_args = shlex.split(cmd_str)
-        #print "SHLEXXED - "
-        #print shlexxed_args
-        # print
-
-        if args.showonly:
-            print("Skipping actual run of ffmpeg due to argument --showonly")
-            sys.exit(0)
-        
-        t0 = time.time()
-        ret = subprocess.call(shlexxed_args)
-        #ret = subprocess.call(cmd_args)
-
-        t1 = time.time()
-        if not ret:
-            print("!!! SUCCESS !!!")
-            report_stats(args.input_file)
-            if not args.check:
-                ofile=cmd_args[-1].strip('"')
-                report_stats(ofile)
-        else:
-            print("FFMpeg exited with error")
-    
-        time_end = strftime("%Y-%m-%d %H:%M:%S", localtime())
-        isize = os.stat(args.input_file).st_size;
-        if not args.check:
-            osize = os.stat(ofile).st_size;
-        box_single_line = '\u2500'
-        box_double_line = '\u2550'
-        print("\n" + box_double_line * 22 + " REPORT " + box_double_line * 22) # print ????????????????????????????????????
-        print("{:<16}: {}".format("Command", " ".join([str(i) for i in cmd_args])))
-        print("{:<16}: {}".format("Start time", time_start))
-        print('{:<16}: {}'.format("End time", time_end))
-        print("{:<16}: {}".format("Conversion Time", strftime ("%H:%M:%S", time.gmtime(t1-t0))))
-        print()
-        if not args.check:
-            if osize < isize:
-                diff = Fore.CYAN + humansize(isize - osize)  + Fore.RESET;
-                diff_ratio = 1.0 - (osize * 1.0) / isize
-                print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} smaller)".format(
-                    "COMPRESSED!!! ", Fore.RED, humansize(isize), Fore.RESET, Fore.GREEN, humansize(osize), Fore.RESET, diff, diff_ratio))
-            else:
-                diff = Fore.BLUE + humansize(osize - isize) + Fore.RESET;
-                diff_ratio = (osize - isize) * 1.0 / isize
-                print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} bigger)".format(
-                    "WARNING!!! (output file bigger) ", Fore.GREEN, humansize(isize), Fore.RESET, Fore.RED, humansize(osize), Fore.RESET, diff, diff_ratio))
-        else:
-            print("Integrity check finished. If you see no error messages, then file has no errors")
-        
-
-        print("\n" + box_single_line * 52) # print ????????????????????????????????????????????????
+if args.join:
+    for file in args.input_file:
+        if not os.path.exists(file):
+            print ("File does not exist - " + file)
+            sys.exit(2)
 else:
-    print("ERROR: No such file - ", args.input_file)
-    sys.exit(-1);
+    if len(args.input_file) > 1:
+        file0 = args.input_file[0]
+        print ("Multiple arguments for input_file. Will use only the first one - " + file0)
+        if not os.path.exists(file0):
+            print ("File does not exist - " + file0)
+            sys.exit(2)
+
+if args.summary:
+    report_stats(args.input_file[0], summary=True)
+elif args.info:
+    report_stats(args.input_file[0])
+else:
+    time_start = strftime("%Y-%m-%d %H:%M:%S", localtime())        
+    cmd_args = construct_cmd()
+    
+    print("\n" + "-" * 22 + " STARTING " + "-" * 22)
+    cmd_str = " ".join([str(i) for i in cmd_args])
+    print(cmd_str)
+    print("\n" + "-" * 54)
+    
+    shlexxed_args = shlex.split(cmd_str)
+    #print "SHLEXXED - "
+    #print shlexxed_args
+    # print
+    
+    if args.showonly:
+        print("Skipping actual run of ffmpeg due to argument --showonly")
+        sys.exit(0)
+            
+    t0 = time.time()
+    ret = subprocess.call(shlexxed_args)
+    #ret = subprocess.call(cmd_args)
+
+    t1 = time.time()
+    if not ret:
+        print("!!! SUCCESS !!!")
+        report_stats(args.input_file[0])
+        if not args.check:
+            ofile=cmd_args[-1].strip('"')
+            report_stats(ofile)
+    else:
+        print("FFMpeg exited with error")
+    
+    time_end = strftime("%Y-%m-%d %H:%M:%S", localtime())
+    isize = os.stat(args.input_file[0]).st_size;
+    if not args.check:
+        osize = os.stat(ofile).st_size;
+    box_single_line = '\u2500'
+    box_double_line = '\u2550'
+    print("\n" + box_double_line * 22 + " REPORT " + box_double_line * 22) # print ????????????????????????????????????
+    print("{:<16}: {}".format("Command", " ".join([str(i) for i in cmd_args])))
+    print("{:<16}: {}".format("Start time", time_start))
+    print('{:<16}: {}'.format("End time", time_end))
+    print("{:<16}: {}".format("Conversion Time", strftime ("%H:%M:%S", time.gmtime(t1-t0))))
+    print()
+    if not args.check:
+        if osize < isize:
+            diff = Fore.CYAN + humansize(isize - osize)  + Fore.RESET;
+            diff_ratio = 1.0 - (osize * 1.0) / isize
+            print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} smaller)".format(
+                "COMPRESSED!!! ", Fore.RED, humansize(isize), Fore.RESET, Fore.GREEN, humansize(osize), Fore.RESET, diff, diff_ratio))
+        else:
+            diff = Fore.BLUE + humansize(osize - isize) + Fore.RESET;
+            diff_ratio = (osize - isize) * 1.0 / isize
+            print("{} Input Filesize ({}{}{}) ~ Output Filesize ({}{}{}) = {} ({:.2%} bigger)".format(
+                "WARNING!!! (output file bigger) ", Fore.GREEN, humansize(isize), Fore.RESET, Fore.RED, humansize(osize), Fore.RESET, diff, diff_ratio))
+    else:
+        print("Integrity check finished. If you see no error messages, then file has no errors")
+        
+
+    print("\n" + box_single_line * 52) # print ????????????????????????????????????????????????
+
+# Cleanup
+if (os.path.exists(JOIN_TEMPFILE)):
+    os.remove(JOIN_TEMPFILE)
