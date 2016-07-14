@@ -377,8 +377,8 @@ def humansize(nbytes):
 init()
 
 
-parser = argparse.ArgumentParser(description='Convert a file using ffmpeg')
-parser.add_argument ('input_file', help="File to be converted", nargs="+")
+parser = argparse.ArgumentParser(description='Wrapper for ffmpeg. Allows you to transcode / concatenate or check files for errors.')
+parser.add_argument ('input_file', help="File(s) to be processed (transcode / check / concatenate)", nargs="+")
 #parser.add_argument ('-t', '--title', help="Title for filename. (Files are renamed to <Title> 01, <Title> 02, ...)", required=True)
 vgroup = parser.add_mutually_exclusive_group()
 agroup = parser.add_mutually_exclusive_group()
@@ -398,8 +398,8 @@ parser.add_argument ('--ffmpeg',            help="Path to ffmpeg.exe", default="
 parser.add_argument ('-p ',     '--preset', help="Preset speed/qual tradeoff. slow(better) ... fast(worse)", default="slow")
 parser.add_argument ('-o',      '--output', help="Specify output filename")
 parser.add_argument ('-n','--no_overwrite', help="Overwrite output file", action="store_true")
-parser.add_argument ('-i',      '--info',   help="Display media information", action="store_true")
-parser.add_argument ('-1', '--summary',     help="Media info one-line summary", action="store_true")
+parser.add_argument ('-i',      '--info',   help="Display media information. Support multiple filenames incl. wildcards", action="store_true")
+parser.add_argument ('-1', '--summary',     help="Media info one-line summary. Support multiple filenames incl. wildcards", action="store_true")
 parser.add_argument ('-s',  '--samecbr',    help="Convert using same CBR as input (audio and video)", action="store_true")
 vgroup.add_argument ('-s:v',    '--vcbr',   help="Convert using same CBR as input (video)", action="store_true")
 agroup.add_argument ('-s:a',    '--acbr',   help="Convert using same CBR as input (audio)", action="store_true")
@@ -411,14 +411,15 @@ parser.add_argument ('--check'   ,          help="Check for integrity of files, 
 parser.add_argument ('--autocrop'   ,       help="Crop black borders automatically", action="store_true")
 parser.add_argument ('--hflip'   ,          help="Flip Horizontally", action="store_true")
 parser.add_argument ('--vflip'   ,          help="Flip Vertically", action="store_true")
-parser.add_argument ('--join',              help="Join list of clips (supports wildcards e.g ffmpy sampA* sampB* --join )", action = "store_true")
+parser.add_argument ('--join',              help="Join list of clips (supports mulitple filenames incl. wildcards e.g ffmpy sampA* sampB* sampC.avi --join )", action = "store_true")
 
 args = parser.parse_args()
 
 # Filename for tempfile which contains entries in the form 'file <input_filename>' for concatenation
 JOIN_TEMPFILE = "ffmpy_join_filelist.txt"
 
-if args.join:
+# Check if all files exist for options supporting multiple files
+if args.join or args.summary or args.info:
     for file in args.input_file:
         if not os.path.exists(file):
             print ("File does not exist - " + file)
@@ -431,10 +432,9 @@ else:
             print ("File does not exist - " + file0)
             sys.exit(2)
 
-if args.summary:
-    report_stats(args.input_file[0], summary=True)
-elif args.info:
-    report_stats(args.input_file[0])
+if args.info or args.summary:
+    for infile in args.input_file:
+        report_stats(infile, args.summary)
 else:
     time_start = strftime("%Y-%m-%d %H:%M:%S", localtime())        
     cmd_args = construct_cmd()
