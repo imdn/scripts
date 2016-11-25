@@ -7,6 +7,7 @@ import sys
 import zipfile
 import re
 import io
+from PIL import Image
 
 # In Memory zipfile
 class InMemZip(object):
@@ -34,13 +35,54 @@ class InMemZip(object):
     def writeToFile(self, filename):
         self.fixPermissions()
         open(filename, 'wb').write(self.read())
-        
+
+# In-memory manipulation of Image
+class InMemImage(object):
+    def __init__(self,fileObj):
+        self.imgFile = Image.open(fileObj)
+        self.height = self.imgFile.height
+        self.width = self.imgFile.width
+
+    def convert_and_save(self, fmt):
+        IMG_EXTENSION = {
+            'png' : ('PNG','png'),
+            'jpeg' : ('JPEG', 'jpg'),
+            'jpg' : ('JPEG', 'jpg')
+        }
+        imgBuf = io.BytesIO()
+        if fmt == None:
+            extension = None
+            self.imgFile.save(imgBuf)
+        else:
+            new_fmt, extension = IMG_EXTENSION[fmt.lower()]
+            print ("Converting to format - {}".format(new_fmt))
+            if self.imgFile.mode == "P":
+                self.imgFile.convert("RGB").save(imgBuf, new_fmt)
+            else:
+                self.imgFile.save(imgBuf, new_fmt)
+        imgBuf.seek(0)
+        return (imgBuf, extension)
+
+    def resize(self, dim):
+        if not re.match('\d+[xX]\d+|\d+[xX]|[xX]\d+', dim):
+            print ("Invalid resize specification - ", dim)
+            sys.exit(-1)
+        width, height = dim.split('x')
+        if width == '':
+            width = self.width * int(height) / self.height
+        elif height == '':
+            height = width * self.height / self.width
+        dimensions = (int(width), int(height))
+
+        print("Resized from {}x{} ----> {}x{}".format(self.width, self.height, int(width), int(height)))
+        self.imgFile = self.imgFile.resize(dimensions, Image.ANTIALIAS)
+
 def parse_range(pg_range, max_range):
     ranges = pg_range.split(",")
     pages = dict()
     for r in ranges:
         if re.match('^\d+$',r):
-            r_num = int('r')
+            r_num = int(r)
             if r_num > max_range:
                 print ("Range Specification exceeds number of files : ", r_num)
             pages[r_num] = 1
@@ -106,12 +148,27 @@ def get_sorted_filelist(zfile):
         sorted_files = sorted(files_no_dirs, key=natural_key)
         return sorted_files
 
-def create_archive_from_extracted(zfile, new_zfile, selection):
+def create_archive_from_extracted(zfile, new_zfile, selection, resize_dim=None, img_format=None):
     memZ = InMemZip()
     with zipfile.ZipFile(zfile,'r') as zbuf:
         for f in selection:
-            buf = zbuf.read(f)
-            memZ.write(f, buf)
+            fname = f
+            if resize_dim is not None or img_format is not None:
+                img = InMemImage(zbuf.open(f))
+                print ("Manipulating Image - '{}'".format(f))
+                if resize_dim is not None:
+                    img.resize(resize_dim)
+                imgbuf, new_ext = img.convert_and_save(img_format)
+                buf = imgbuf.read()
+                dir = os.path.dirname(f)
+                name_no_ext, old_ext = os.path.splitext(os.path.basename(f))
+                if new_ext is None:
+                    new_ext = old_ext
+                fname = os.path.join (dir, name_no_ext) + "." + new_ext
+            else:
+                buf = zbuf.read(f)
+
+            memZ.write(fname, buf)
 
     memZ.writeToFile(new_zfile)
 
@@ -130,7 +187,8 @@ def join_selected_archives(files, new_zfile):
     #memZ.printdir()
     memZ.writeToFile(new_zfile)
 
-            
+def resize_images():
+    return 
 
 def main():
     parser = argparse.ArgumentParser(description='Manipulate Comic Book archives (split, extract, trim)')
@@ -139,6 +197,8 @@ def main():
     input_group.add_argument('-i', '--input', help="Path to comic book archive (cbz/cbr/zip/rar)")
     input_group.add_argument('-j', '--join', help="Join filenames in Order Specified", nargs="+")
     parser.add_argument('-x', '--extract', help="Extract ranges to new archive. Format 3,4,10-19")
+    parser.add_argument('-r', '--resize', help="Resize images e.g. 1600x1200, x1200 (height only), 1600x (width only) ", default=None)
+    parser.add_argument('-f', '--iformat', help="Convert images to formart (png/jpg)", default=None)
     parser.add_argument('-o', '--output', help="Output filename")
 
     args=parser.parse_args()
@@ -148,6 +208,8 @@ def main():
             sorted_files = get_sorted_filelist(args.input)
             print ("Files in archive (Excl. directories) - ", len(sorted_files))
 
+            if args.output is None:
+                args.output = generate_archive_name(args.input)
             if args.extract is not None:
                 pages_2_extract = parse_range(args.extract, len(sorted_files))
                 if len(pages_2_extract.keys()) == 0:
@@ -161,9 +223,10 @@ def main():
                         if count in  pages_2_extract:
                             selected_pages.append(file)
                     #print ("Selected Pages - ", selected_pages)
-                    if args.output is None:
-                        args.output = generate_archive_name(args.input)
-                    create_archive_from_extracted(args.input, args.output, selected_pages)
+                    create_archive_from_extracted(args.input, args.output, selected_pages, args.resize, args.iformat)
+
+            elif args.resize or args.iformat is not None:
+                create_archive_from_extracted(args.input, args.output, sorted_files, args.resize, args.iformat)
         else:
             print ("ERROR! Invalid zip file - ", args.input)
     elif args.join is not None:
