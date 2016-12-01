@@ -104,6 +104,29 @@ def parse_range(pg_range, max_range):
             
     return pages
 
+# Scale val from [a,b] to [c,d]
+def scale(val, a, b, c, d):
+    x = c * (1 - (val - a) / (b - a)) + d * ((val - a) / (b - a))
+    return x
+
+# Graphical display of which pages have been modified
+def page_range_graphic(selected_pages, max_pages):
+    unselected_page_symbol = u'\u2500'
+    selected_page_symbol = u'\u2550'
+    eof_symbol = u'\u2588'
+    max_cols = 99
+    pg_status = [unselected_page_symbol for i in range(0,max_cols)]
+    for key in sorted(selected_pages.keys()):
+        index = int(scale(key, 1, max_pages, 1, len(pg_status)))
+        if pg_status[index - 1] == unselected_page_symbol:
+            pg_status[index - 1] = selected_page_symbol
+        #print("{} ({}) - {}, {}".format(key, index,(key - 1) not in selected_pages.keys(),(key + 1) not in selected_pages.keys()))
+        if ((key - 1) not in selected_pages.keys()):
+            pg_status[index - 1] = "{}{}".format(key, selected_page_symbol)
+        elif  ((key + 1) not in selected_pages.keys()):
+            pg_status[index - 1] = "{}{}".format(selected_page_symbol, key)
+    return ''.join(pg_status) + eof_symbol
+    
 # Natural sorting for filenames
 def natural_key(string_):
     """See http://www.codinghorror.com/blog/archives/001018.html"""
@@ -187,14 +210,17 @@ def join_selected_archives(files, new_zfile):
     #memZ.printdir()
     memZ.writeToFile(new_zfile)
 
-def resize_images():
-    return 
+def get_user_confirmation(msg):
+    ch = input(msg + " [yN]")
+    if ch == 'y' or ch == "Y":
+        return True
+    return False
 
 def main():
     parser = argparse.ArgumentParser(description='Manipulate Comic Book archives (split, extract, trim)')
     input_group = parser.add_mutually_exclusive_group()
 
-    input_group.add_argument('-i', '--input', help="Path to comic book archive (cbz/cbr/zip/rar)")
+    input_group.add_argument('-i', '--input', help="Path to comic book archive (cbz/cbr/zip/rar)", default=None)
     input_group.add_argument('-j', '--join', help="Join filenames in Order Specified", nargs="+")
     parser.add_argument('-x', '--extract', help="Extract ranges to new archive. Format 3,4,10-19")
     parser.add_argument('-r', '--resize', help="Resize images e.g. 1600x1200, x1200 (height only), 1600x (width only) ", default=None)
@@ -206,8 +232,8 @@ def main():
     if args.input is not None:
         if zipfile.is_zipfile(args.input):
             sorted_files = get_sorted_filelist(args.input)
-            print ("Files in archive (Excl. directories) - ", len(sorted_files))
-
+            #print ("Files in archive (Excl. directories) - ", len(sorted_files))
+            
             if args.output is None:
                 args.output = generate_archive_name(args.input)
             if args.extract is not None:
@@ -215,7 +241,8 @@ def main():
                 if len(pages_2_extract.keys()) == 0:
                     print ("Invalid range specification")
                 else:
-                    print ("{} of {} pages will be extracted".format(len(pages_2_extract), len(sorted_files)))
+                    graphic = page_range_graphic(pages_2_extract, len(sorted_files))
+                    print ("\n{} of {} pages will be extracted\n\n{}\n".format(len(pages_2_extract), len(sorted_files), graphic))
                     count = 0
                     selected_pages = []
                     for file in sorted_files:
@@ -223,10 +250,12 @@ def main():
                         if count in  pages_2_extract:
                             selected_pages.append(file)
                     #print ("Selected Pages - ", selected_pages)
-                    create_archive_from_extracted(args.input, args.output, selected_pages, args.resize, args.iformat)
+                    if get_user_confirmation("Extract files and create new archive?"):
+                        create_archive_from_extracted(args.input, args.output, selected_pages, args.resize, args.iformat)
 
             elif args.resize or args.iformat is not None:
-                create_archive_from_extracted(args.input, args.output, sorted_files, args.resize, args.iformat)
+                if get_user_confirmation("Process files and create new archive?"):
+                    create_archive_from_extracted(args.input, args.output, sorted_files, args.resize, args.iformat)
         else:
             print ("ERROR! Invalid zip file - ", args.input)
     elif args.join is not None:
@@ -237,8 +266,10 @@ def main():
         
         if args.output is None:
             args.output = generate_archive_name(args.join[0])
-        join_selected_archives(args.join, args.output)
+        if get_user_confirmation("Join files and create new archive?"):
+            join_selected_archives(args.join, args.output)
 
+    print ("Done!\n")
 
 if __name__ == "__main__":
     main()
