@@ -110,6 +110,7 @@ def scale(val, a, b, c, d):
     return x
 
 # Graphical display of which pages have been modified
+# TODO : Boundary condition in case of low bin size
 def page_range_graphic(selected_pages, max_pages):
     unselected_page_symbol = u'\u2500'
     selected_page_symbol = u'\u2550'
@@ -122,9 +123,17 @@ def page_range_graphic(selected_pages, max_pages):
             pg_status[index - 1] = selected_page_symbol
         #print("{} ({}) - {}, {}".format(key, index,(key - 1) not in selected_pages.keys(),(key + 1) not in selected_pages.keys()))
         if ((key - 1) not in selected_pages.keys()):
-            pg_status[index - 1] = "{}{}".format(key, selected_page_symbol)
+            separator = ""
+            if index > 1 and re.match('.?\d+', pg_status[index - 2]):
+                separator = unselected_page_symbol
+            #pg_status[index - 1] = "{}{}{}".format(separator, key, selected_page_symbol)
+            pg_status[index - 1] = "{}{}".format(separator, key)
         elif  ((key + 1) not in selected_pages.keys()):
-            pg_status[index - 1] = "{}{}".format(selected_page_symbol, key)
+            symbol = selected_page_symbol
+            #symbol = "{}-".format(pg_status[index - 1])
+            if re.match('\d+', pg_status[index-1]):
+                symbol = "{}{}".format(pg_status[index - 1], unselected_page_symbol)
+            pg_status[index - 1] = "{}{}".format(symbol, key)
     return ''.join(pg_status) + eof_symbol
     
 # Natural sorting for filenames
@@ -218,24 +227,38 @@ def get_user_confirmation(msg):
 
 def main():
     parser = argparse.ArgumentParser(description='Manipulate Comic Book archives (split, extract, trim)')
-    input_group = parser.add_mutually_exclusive_group()
+    ops_group = parser.add_mutually_exclusive_group()
 
-    input_group.add_argument('-i', '--input', help="Path to comic book archive (cbz/cbr/zip/rar)", default=None)
-    input_group.add_argument('-j', '--join', help="Join filenames in Order Specified", nargs="+")
-    parser.add_argument('-x', '--extract', help="Extract ranges to new archive. Format 3,4,10-19")
+    parser.add_argument('input', help="Path to comic book archive (cbz/cbr/zip/rar). Multiple files for join are allowed", default=None, nargs="+")
+    ops_group.add_argument('-j', '--join', help="Join input files in specified order", action="store_true", default=False)
+    ops_group.add_argument('-x', '--extract', help="Extract ranges to new archive. Format 3,4,10-19")
     parser.add_argument('-r', '--resize', help="Resize images e.g. 1600x1200, x1200 (height only), 1600x (width only) ", default=None)
     parser.add_argument('-f', '--iformat', help="Convert images to formart (png/jpg)", default=None)
     parser.add_argument('-o', '--output', help="Output filename")
 
     args=parser.parse_args()
 
-    if args.input is not None:
-        if zipfile.is_zipfile(args.input):
-            sorted_files = get_sorted_filelist(args.input)
+    if args.join is True:
+        for file in args.input:
+            if not zipfile.is_zipfile(file):
+                print ("ERROR! Invalid zip file - ", file)
+                sys.exit(-1)
+        
+        if args.output is None:
+            args.output = generate_archive_name(args.join[0])
+        if get_user_confirmation("Join files and create new archive?"):
+            join_selected_archives(args.input, args.output)
+    elif args.input is not None:
+        if len(args.input) > 1:
+            print ("More than one input file specified. This is valid only with -j/--join switch.")
+            sys.exit(-1)
+        comic_file =  args.input[0]
+        if zipfile.is_zipfile(comic_file):
+            sorted_files = get_sorted_filelist(comic_file)
             #print ("Files in archive (Excl. directories) - ", len(sorted_files))
             
             if args.output is None:
-                args.output = generate_archive_name(args.input)
+                args.output = generate_archive_name(comic_file)
             if args.extract is not None:
                 pages_2_extract = parse_range(args.extract, len(sorted_files))
                 if len(pages_2_extract.keys()) == 0:
@@ -251,23 +274,13 @@ def main():
                             selected_pages.append(file)
                     #print ("Selected Pages - ", selected_pages)
                     if get_user_confirmation("Extract files and create new archive?"):
-                        create_archive_from_extracted(args.input, args.output, selected_pages, args.resize, args.iformat)
+                        create_archive_from_extracted(comic_file, args.output, selected_pages, args.resize, args.iformat)
 
             elif args.resize or args.iformat is not None:
                 if get_user_confirmation("Process files and create new archive?"):
-                    create_archive_from_extracted(args.input, args.output, sorted_files, args.resize, args.iformat)
+                    create_archive_from_extracted(comic_file, args.output, sorted_files, args.resize, args.iformat)
         else:
-            print ("ERROR! Invalid zip file - ", args.input)
-    elif args.join is not None:
-        for file in args.join:
-            if not zipfile.is_zipfile(file):
-                print ("ERROR! Invalid zip file - ", file)
-                sys.exit(-1)
-        
-        if args.output is None:
-            args.output = generate_archive_name(args.join[0])
-        if get_user_confirmation("Join files and create new archive?"):
-            join_selected_archives(args.join, args.output)
+            print ("ERROR! Invalid zip file - ", comic_file)
 
     print ("Done!\n")
 
