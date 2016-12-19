@@ -245,7 +245,7 @@ def main():
                 sys.exit(-1)
         
         if args.output is None:
-            args.output = generate_archive_name(args.join[0])
+            args.output = generate_archive_name(args.input[0])
         if get_user_confirmation("Join files and create new archive?"):
             join_selected_archives(args.input, args.output)
     elif args.input is not None:
