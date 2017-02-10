@@ -190,6 +190,8 @@ def create_archive_from_extracted(zfile, new_zfile, selection, resize_dim=None, 
                 print ("Manipulating Image - '{}'".format(f))
                 if resize_dim is not None:
                     img.resize(resize_dim)
+                    if img_format is None:
+                        img_format = os.path.splitext(fname)[1].lstrip('.')
                 imgbuf, new_ext = img.convert_and_save(img_format)
                 buf = imgbuf.read()
                 dir = os.path.dirname(f)
